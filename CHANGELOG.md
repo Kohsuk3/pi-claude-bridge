@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 — 2026-05-29
+
+- **Add: claude-opus-4-8 model** — Added `claude-opus-4-8` as a selectable model. The `opus` shortcut now resolves to 4.8 by default; 4.7 and 4.6 remain available for explicit pinning.
+
 ## 0.4.0 — 2026-05-04
 
 - **Fix: Opus 4.7 + xhigh sent wrong effort to SDK** — pi-ai 0.72 ships per-model `thinkingLevelMap` overrides (e.g. `claude-opus-4-7` declares `xhigh→xhigh`, not `xhigh→max`), but our hardcoded `REASONING_TO_EFFORT` table ignored them. Effort lookup now consults `model.thinkingLevelMap` first, falls back to the table for older pi-ai or unmapped levels. Forwarded `thinkingLevelMap` through `buildModels` projection.
