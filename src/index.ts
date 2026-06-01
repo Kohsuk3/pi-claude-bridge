@@ -837,6 +837,125 @@ async function consumeQuery(
 	return { capturedSessionId };
 }
 
+// --- Ephemeral one-shot query (compaction / branch summary) ---
+// Pi's compaction and branch-summary send a single self-contained user message
+// (the serialized transcript + a summary prompt) with their own systemPrompt and
+// NO prior history — they are NOT a continuation of the conversation. Routing them
+// through the normal provider path is wrong on two counts:
+//   1. syncSharedSession sees priorMessages.length === 0, matches its REUSE branch
+//      (missed === []), and RESUMES the real conversation's CC session — reloading
+//      the entire (often huge) transcript and gluing the summary turn on top, then
+//      overwriting sharedSession. With high thinking, /compact appeared to hang for
+//      minutes.
+//   2. Under split-turn auto-compaction pi fires two of these in parallel; both
+//      resumed the same session JSONL and deadlocked the CC subprocesses.
+// Run them as a fully isolated one-shot: no resume, no shared state, persistSession
+// off. Independent queries can safely run in parallel.
+function streamEphemeralQuery(
+	model: Model<any>,
+	context: Context,
+	options: SimpleStreamOptions | undefined,
+	stream: AssistantMessageEventStream,
+): void {
+	const turnOutput: AssistantMessage = {
+		role: "assistant",
+		content: [],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+		stopReason: "stop",
+		timestamp: Date.now(),
+	};
+
+	const cwd = (options as { cwd?: string } | undefined)?.cwd ?? process.cwd();
+	const claudeExecutable = loadConfig(cwd).provider?.pathToClaudeCodeExecutable;
+	const effort = options?.reasoning
+		? ((model as any).thinkingLevelMap?.[options.reasoning] as EffortLevel | undefined)
+			?? REASONING_TO_EFFORT[options.reasoning]
+		: undefined;
+
+	const extraArgs: Record<string, string | null> = { model: model.id, "strict-mcp-config": null };
+	if (effort) extraArgs["thinking-display"] = "summarized";
+
+	const customSystemPrompt = typeof context.systemPrompt === "string" && context.systemPrompt
+		? context.systemPrompt
+		: undefined;
+	const promptText = extractUserPrompt(context.messages) ?? "";
+
+	const sdkQuery = query({
+		prompt: promptText,
+		options: {
+			cwd,
+			env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: "0", DISABLE_AUTO_COMPACT: "1" },
+			tools: [],
+			permissionMode: "bypassPermissions",
+			includePartialMessages: false,
+			persistSession: false,
+			systemPrompt: customSystemPrompt ?? { type: "preset", preset: "claude_code" },
+			extraArgs,
+			...(effort ? { effort } : {}),
+			...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
+			...makeCliDebugOptions("ephemeral"),
+		},
+	});
+
+	let aborted = false;
+	const onAbort = () => {
+		aborted = true;
+		void sdkQuery.interrupt().catch(() => {});
+		try { sdkQuery.close(); } catch {}
+	};
+	if (options?.signal) {
+		if (options.signal.aborted) onAbort();
+		else options.signal.addEventListener("abort", onAbort, { once: true });
+	}
+
+	debug(`provider: ephemeral one-shot query, model=${model.id} effort=${effort ?? "default"} promptLen=${promptText.length} customSys=${Boolean(customSystemPrompt)}`);
+
+	void (async () => {
+		let text = "";
+		for await (const message of sdkQuery) {
+			if (aborted) break;
+			if (message.type === "assistant") {
+				for (const block of message.message.content as Array<{ type: string; text?: string }>) {
+					if (block.type === "text" && block.text) text += block.text;
+				}
+			} else if (message.type === "result" && message.subtype === "success" && !text) {
+				text = (message as { result?: string }).result ?? "";
+			}
+		}
+
+		if (aborted || options?.signal?.aborted) {
+			turnOutput.stopReason = "aborted";
+			turnOutput.errorMessage = "Operation aborted";
+			stream.push({ type: "error", reason: "aborted", error: turnOutput });
+			stream.end();
+			return;
+		}
+
+		turnOutput.content.push({ type: "text", text });
+		stream.push({ type: "start", partial: turnOutput });
+		stream.push({ type: "text_start", contentIndex: 0, partial: turnOutput });
+		stream.push({ type: "text_delta", contentIndex: 0, delta: text, partial: turnOutput });
+		stream.push({ type: "text_end", contentIndex: 0, content: text, partial: turnOutput });
+		stream.push({ type: "done", reason: "stop", message: turnOutput });
+		stream.end();
+	})()
+		.catch((error) => {
+			debug(`provider: ephemeral query error:`, error);
+			turnOutput.stopReason = "error";
+			turnOutput.errorMessage = error instanceof Error ? error.message : String(error);
+			stream.push({ type: "error", reason: "error", error: turnOutput });
+			stream.end();
+		})
+		.finally(() => {
+			if (options?.signal) options.signal.removeEventListener("abort", onAbort);
+			try { sdkQuery.close(); } catch {}
+		});
+}
+
 /** Provider entry point. Pi calls this for each new prompt and each tool result.
  *  Two cases: tool result delivery (active query) or fresh query. */
 function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream {
@@ -911,6 +1030,17 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 			stream.push({ type: "done", reason: "stop", message: c.turnOutput });
 			stream.end();
 		});
+		return stream;
+	}
+
+	// --- Ephemeral side query (compaction / branch summary) ---
+	// A single self-contained user message arriving at top level while a real
+	// conversation is already underway is pi's compaction/branch-summary call,
+	// not a continuation. Run it isolated so it never resumes or clobbers the
+	// shared session (see streamEphemeralQuery for the full rationale).
+	if (!ctx().activeQuery && sharedSession && context.messages.length === 1 && lastMsg?.role === "user") {
+		debug(`provider: routing to ephemeral one-shot (compaction/branch summary)`);
+		streamEphemeralQuery(model, context, options, stream);
 		return stream;
 	}
 

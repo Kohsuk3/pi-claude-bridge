@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2 — 2026-06-01
+
+- **Fix: `/compact` hangs (and split-turn auto-compaction deadlocks)** — pi's compaction and branch-summary send a single self-contained user message (the serialized transcript + a summary prompt) with no prior history. `syncSharedSession` saw `priorMessages.length === 0`, matched its REUSE branch (`missed === []`), and **resumed the real conversation's CC session** — reloading the entire transcript and gluing the summary turn on top (with high thinking, `/compact` appeared to hang for minutes), then overwriting `sharedSession`. Under split-turn auto-compaction pi fires two summaries in parallel via `Promise.all`; both resumed the same session JSONL and deadlocked the CC subprocesses. Now these are detected (single top-level user message while a conversation is already underway) and routed to `streamEphemeralQuery`: an isolated one-shot with no resume, no shared state, and `persistSession: false`, so it never touches `sharedSession` and parallel summaries run safely.
+
 ## 0.4.1 — 2026-05-29
 
 - **Add: claude-opus-4-8 model** — Added `claude-opus-4-8` as a selectable model. The `opus` shortcut now resolves to 4.8 by default; 4.7 and 4.6 remain available for explicit pinning.
