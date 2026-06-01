@@ -956,10 +956,34 @@ function streamEphemeralQuery(
 		});
 }
 
+// Pi tags every compaction and branch-summary completion with this exact system
+// prompt (see pi-coding-agent compaction/utils.ts SUMMARIZATION_SYSTEM_PROMPT).
+// It's the reliable signal that a query is a self-contained summarization (a
+// transcript serialized into one prompt), not a continuation of the conversation.
+const SUMMARIZATION_SYSTEM_PROMPT_MARKER = "You are a context summarization assistant";
+function isSummarizationContext(context: Context): boolean {
+	return typeof context.systemPrompt === "string"
+		&& context.systemPrompt.startsWith(SUMMARIZATION_SYSTEM_PROMPT_MARKER);
+}
+
 /** Provider entry point. Pi calls this for each new prompt and each tool result.
  *  Two cases: tool result delivery (active query) or fresh query. */
 function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream {
 	const stream = newAssistantMessageEventStream();
+
+	// --- Ephemeral side query (compaction / branch summary) ---
+	// Detected by pi's fixed summarization system prompt and intercepted BEFORE any
+	// session/tool-result handling. These queries are self-contained one-shots, never
+	// a continuation, so routing them through the normal path is wrong: syncSharedSession
+	// resumes (or rebuilds onto) the real conversation's CC session — reloading the whole
+	// transcript (with high thinking, /compact appeared to hang for minutes) and clobbering
+	// sharedSession; split-turn auto-compaction even fires two in parallel that deadlock on
+	// the same session JSONL. Run them isolated instead. See streamEphemeralQuery.
+	if (isSummarizationContext(context)) {
+		debug(`provider: routing to ephemeral one-shot (compaction/branch summary), msgs=${context.messages.length}`);
+		streamEphemeralQuery(model, context, options, stream);
+		return stream;
+	}
 
 	// DEBUG: trace followUp message triggering
 	const lastMsgRole = context.messages[context.messages.length - 1]?.role;
@@ -1030,17 +1054,6 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 			stream.push({ type: "done", reason: "stop", message: c.turnOutput });
 			stream.end();
 		});
-		return stream;
-	}
-
-	// --- Ephemeral side query (compaction / branch summary) ---
-	// A single self-contained user message arriving at top level while a real
-	// conversation is already underway is pi's compaction/branch-summary call,
-	// not a continuation. Run it isolated so it never resumes or clobbers the
-	// shared session (see streamEphemeralQuery for the full rationale).
-	if (!ctx().activeQuery && sharedSession && context.messages.length === 1 && lastMsg?.role === "user") {
-		debug(`provider: routing to ephemeral one-shot (compaction/branch summary)`);
-		streamEphemeralQuery(model, context, options, stream);
 		return stream;
 	}
 
