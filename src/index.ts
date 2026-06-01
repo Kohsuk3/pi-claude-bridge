@@ -871,10 +871,12 @@ function streamEphemeralQuery(
 
 	const cwd = (options as { cwd?: string } | undefined)?.cwd ?? process.cwd();
 	const claudeExecutable = loadConfig(cwd).provider?.pathToClaudeCodeExecutable;
-	const effort = options?.reasoning
-		? ((model as any).thinkingLevelMap?.[options.reasoning] as EffortLevel | undefined)
-			?? REASONING_TO_EFFORT[options.reasoning]
-		: undefined;
+	// Summarization is mechanical and the serialized transcript can be huge (180k+
+	// tokens). High thinking reserves a large output budget that is subtracted from the
+	// context window, pushing the prompt over the limit ("Prompt is too long"). Pin the
+	// lowest effort so the whole transcript fits; the user's thinking level is irrelevant
+	// to a one-shot summary.
+	const effort: EffortLevel = "low";
 
 	const extraArgs: Record<string, string | null> = { model: model.id, "strict-mcp-config": null };
 	if (effort) extraArgs["thinking-display"] = "summarized";
