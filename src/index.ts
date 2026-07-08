@@ -1,7 +1,7 @@
 import { calculateCost, getModels, StringEnum, type AssistantMessage, type AssistantMessageEventStream, type Context, type Model, type SimpleStreamOptions, type Tool } from "@mariozechner/pi-ai";
 import * as piAi from "@mariozechner/pi-ai";
 import { buildSessionContext, keyHint, type ExtensionAPI, type ExtensionUIContext } from "@mariozechner/pi-coding-agent";
-import { createSdkMcpServer, query, type EffortLevel, type SDKMessage, type SDKUserMessage, type SettingSource } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, query, type CanUseTool, type EffortLevel, type SDKMessage, type SDKUserMessage, type SettingSource } from "@anthropic-ai/claude-agent-sdk";
 import type { Base64ImageSource, ContentBlockParam, MessageParam } from "@anthropic-ai/sdk/resources";
 import { Type } from "typebox";
 import { Text } from "@mariozechner/pi-tui";
@@ -159,6 +159,24 @@ const MODE_DISALLOWED_TOOLS: Record<string, string[]> = {
 		"CronCreate", "CronDelete", "TeamCreate", "TeamDelete",
 		"WebFetch", "WebSearch",
 	],
+};
+
+// Application-level permission gate.
+//
+// permissionMode "bypassPermissions" is the fast path, but it is a *server*
+// setting: Enterprise policy can neutralize it, after which the SDK falls back
+// to a prompting permission mode. With no canUseTool wired up, nobody answers
+// those prompts and the query hangs forever. canUseTool is app-controlled, so
+// it works regardless of the Enterprise bypass ban — deny tools disallowed for
+// the current mode, allow everything else. Passing no mode allows everything.
+const makeCanUseTool = (mode?: string): CanUseTool => {
+	const disallowed = mode ? (MODE_DISALLOWED_TOOLS[mode] ?? []) : [];
+	return async (toolName, input) => {
+		if (disallowed.includes(toolName)) {
+			return { behavior: "deny", message: `${toolName} is disallowed in ${mode} mode` };
+		}
+		return { behavior: "allow", updatedInput: input };
+	};
 };
 
 // --- Session persistence ---
@@ -893,6 +911,7 @@ function streamEphemeralQuery(
 			env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: "0", DISABLE_AUTO_COMPACT: "1" },
 			tools: [],
 			permissionMode: "bypassPermissions",
+			canUseTool: makeCanUseTool(),
 			includePartialMessages: false,
 			persistSession: false,
 			systemPrompt: customSystemPrompt ?? { type: "preset", preset: "claude_code" },
@@ -1149,6 +1168,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 		env: childEnv,
 		tools: [],
 		permissionMode: "bypassPermissions",
+		canUseTool: makeCanUseTool(),
 		includePartialMessages: true,
 		systemPrompt: {
 			type: "preset", preset: "claude_code",
@@ -1370,6 +1390,7 @@ async function promptAndWait(
 			cwd,
 			env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: "0", DISABLE_AUTO_COMPACT: "1" },
 			permissionMode: "bypassPermissions",
+			canUseTool: makeCanUseTool(mode),
 			...(disallowedTools.length ? { disallowedTools } : {}),
 			...(effort ? { effort } : {}),
 			systemPrompt: skillsBlock
