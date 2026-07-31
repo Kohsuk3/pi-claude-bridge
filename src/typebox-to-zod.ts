@@ -21,7 +21,11 @@ export function jsonSchemaPropertyToZod(prop: Record<string, unknown>): z.ZodTyp
 		case "array": base = prop.items
 			? z.array(jsonSchemaPropertyToZod(prop.items as Record<string, unknown>))
 			: z.array(z.unknown()); break;
-		case "object": base = z.record(z.string(), z.unknown()); break;
+		// Recurse so nested field names reach the model. Collapsing to z.record() here leaves the
+		// model guessing, e.g. structured_output's `value` wrapper made it invent its own keys.
+		case "object": base = prop.properties
+			? z.object(jsonSchemaToZodShape(prop))
+			: z.record(z.string(), z.unknown()); break;
 		default: base = z.unknown();
 	}
 	if (typeof prop.description === "string") base = base.describe(prop.description);
