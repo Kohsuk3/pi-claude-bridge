@@ -2,7 +2,7 @@
 // `resolveModelId` returns the first partial match, so `opus` resolves to the first-listed opus entry.
 // Extracted from index.ts so tests can import without activating the extension.
 
-export const MODEL_IDS_IN_ORDER = ["claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"];
+export const MODEL_IDS_IN_ORDER = ["claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5"];
 
 // Entries for models the claude CLI accepts but pi-ai's registry does not know yet
 // (newly released models). buildModels falls back to these so they still appear in
@@ -14,6 +14,10 @@ export const EXTRA_MODELS: Record<string, { id: string; name: string; reasoning:
 	},
 	"claude-opus-5": {
 		id: "claude-opus-5", name: "Claude Opus 5", reasoning: true,
+		input: ["text", "image"], contextWindow: 200000, maxTokens: 64000,
+	},
+	"claude-sonnet-5": {
+		id: "claude-sonnet-5", name: "Claude Sonnet 5", reasoning: true,
 		input: ["text", "image"], contextWindow: 200000, maxTokens: 64000,
 	},
 };

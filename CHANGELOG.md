@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.5 — 2026-07-31
+
+- **Add: claude-sonnet-5 model** — Added `claude-sonnet-5` as a selectable model via the same `EXTRA_MODELS` fallback path as opus-5, since pi-ai's registry does not know it yet. The `sonnet` shortcut now resolves to sonnet-5 by default; 4.6 remains available for explicit pinning.
+
 ## 0.4.4 — 2026-07-31
 
 - **Add: claude-opus-5 model** — Added `claude-opus-5` as a selectable model. Since pi-ai's registry does not know it yet, it ships via the `EXTRA_MODELS` fallback so it still appears in the picker; pi-ai entries take precedence once the registry catches up. The `opus` shortcut now resolves to opus-5 by default; 4.8, 4.7 and 4.6 remain available for explicit pinning.

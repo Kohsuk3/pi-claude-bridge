@@ -62,6 +62,10 @@ describe("resolveModelId", () => {
 		assert.equal(resolveModelId(models, "opus"), "claude-opus-5");
 	});
 
+	it("sonnet shortcut resolves to claude-sonnet-5 (first sonnet in order)", () => {
+		assert.equal(resolveModelId(models, "sonnet"), "claude-sonnet-5");
+	});
+
 	it("haiku shortcut resolves to claude-haiku-4-5", () => {
 		assert.equal(resolveModelId(models, "haiku"), "claude-haiku-4-5");
 	});
