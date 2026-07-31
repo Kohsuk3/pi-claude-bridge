@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4 — 2026-07-31
+
+- **Add: claude-opus-5 model** — Added `claude-opus-5` as a selectable model. Since pi-ai's registry does not know it yet, it ships via the `EXTRA_MODELS` fallback so it still appears in the picker; pi-ai entries take precedence once the registry catches up. The `opus` shortcut now resolves to opus-5 by default; 4.8, 4.7 and 4.6 remain available for explicit pinning.
+
 ## 0.4.3 — 2026-06-01
 
 - **Fix: compaction of large transcripts failed with "Prompt is too long"** — once `/compact` stopped hanging (0.4.2), summarizing a big conversation (180k+ tokens serialized into one prompt) errored out at high thinking. High effort reserves a large output budget that is subtracted from the model's context window, leaving too little room for the input. `streamEphemeralQuery` now pins effort to `low` for summarization regardless of the user's thinking level — a one-shot summary doesn't need deep reasoning, and the freed budget lets the whole transcript fit.

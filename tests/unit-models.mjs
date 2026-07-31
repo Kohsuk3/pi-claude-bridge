@@ -5,7 +5,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { MODEL_IDS_IN_ORDER, buildModels, resolveModelId } from "../src/models.js";
+import { MODEL_IDS_IN_ORDER, EXTRA_MODELS, buildModels, resolveModelId } from "../src/models.js";
 
 // Simulated pi-ai registry entry — extra fields mimic the ones pi-ai exposes
 // that must not leak into the provider-registered MODELS array.
@@ -33,10 +33,18 @@ describe("MODELS projection", () => {
 		assert.deepEqual(models.map((m) => m.id), MODEL_IDS_IN_ORDER);
 	});
 
-	it("silently drops IDs missing from pi-ai (no fallback)", () => {
-		// Only haiku present — opus/sonnet vanish from picker.
+	it("drops IDs missing from both pi-ai and EXTRA_MODELS, but keeps EXTRA fallbacks", () => {
+		// Only haiku present in pi-ai — opus/sonnet vanish, but EXTRA_MODELS ids survive.
 		const models = buildModels([mockPiAiModel("claude-haiku-4-5")]);
-		assert.deepEqual(models.map((m) => m.id), ["claude-haiku-4-5"]);
+		const expected = MODEL_IDS_IN_ORDER.filter((id) => id === "claude-haiku-4-5" || id in EXTRA_MODELS);
+		assert.deepEqual(models.map((m) => m.id), expected);
+	});
+
+	it("uses EXTRA_MODELS fallback for claude-fable-5 when pi-ai lacks it", () => {
+		const models = buildModels([mockPiAiModel("claude-haiku-4-5")]);
+		const fable = models.find((m) => m.id === "claude-fable-5");
+		assert.ok(fable, "claude-fable-5 should appear via EXTRA_MODELS");
+		assert.equal(fable.name, "Claude Fable 5");
 	});
 
 	it("zeros out cost regardless of pi-ai pricing", () => {
@@ -50,8 +58,8 @@ describe("MODELS projection", () => {
 describe("resolveModelId", () => {
 	const models = buildModels(MODEL_IDS_IN_ORDER.map(mockPiAiModel));
 
-	it("opus shortcut resolves to claude-opus-4-8 (first opus in order)", () => {
-		assert.equal(resolveModelId(models, "opus"), "claude-opus-4-8");
+	it("opus shortcut resolves to claude-opus-5 (first opus in order)", () => {
+		assert.equal(resolveModelId(models, "opus"), "claude-opus-5");
 	});
 
 	it("haiku shortcut resolves to claude-haiku-4-5", () => {
