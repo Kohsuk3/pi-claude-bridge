@@ -47,6 +47,14 @@ describe("MODELS projection", () => {
 		assert.equal(fable.name, "Claude Fable 5");
 	});
 
+	it("uses EXTRA_MODELS fallback for claude-fable-5-1 when pi-ai lacks it", () => {
+		const models = buildModels([mockPiAiModel("claude-haiku-4-5")]);
+		const fable = models.find((m) => m.id === "claude-fable-5-1");
+		assert.ok(fable, "claude-fable-5-1 should appear via EXTRA_MODELS");
+		assert.equal(fable.name, "Claude Fable 5.1");
+		assert.equal(fable.contextWindow, 1000000);
+	});
+
 	it("zeros out cost regardless of pi-ai pricing", () => {
 		const models = buildModels(MODEL_IDS_IN_ORDER.map(mockPiAiModel));
 		for (const m of models) {
@@ -64,6 +72,14 @@ describe("resolveModelId", () => {
 
 	it("sonnet shortcut resolves to claude-sonnet-5 (first sonnet in order)", () => {
 		assert.equal(resolveModelId(models, "sonnet"), "claude-sonnet-5");
+	});
+
+	it("fable shortcut resolves to claude-fable-5-1 (first fable in order)", () => {
+		assert.equal(resolveModelId(models, "fable"), "claude-fable-5-1");
+	});
+
+	it("exact ID beats a partial match on a longer ID", () => {
+		assert.equal(resolveModelId(models, "claude-fable-5"), "claude-fable-5");
 	});
 
 	it("haiku shortcut resolves to claude-haiku-4-5", () => {

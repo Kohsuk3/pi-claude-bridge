@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.6 — 2026-09-03
+
+- **Add: claude-fable-5-1 model** — Added `claude-fable-5-1` (Fable 5.1, 1M context, 64k output) via the same `EXTRA_MODELS` fallback path as the other new models. The `fable` shortcut now resolves to 5.1 by default, matching the claude CLI's own alias; `claude-fable-5` remains available for explicit pinning.
+- **Fix: full model IDs that prefix a longer ID were mis-resolved** — `resolveModelId` returned the first partial match, so `claude-fable-5` resolved to `claude-fable-5-1`. Exact matches now take precedence over partial ones.
+
 ## 0.4.5 — 2026-07-31
 
 - **Add: claude-sonnet-5 model** — Added `claude-sonnet-5` as a selectable model via the same `EXTRA_MODELS` fallback path as opus-5, since pi-ai's registry does not know it yet. The `sonnet` shortcut now resolves to sonnet-5 by default; 4.6 remains available for explicit pinning.
