@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.7 — 2026-09-04
+
+- **Fix: claude-fable-5-1 failed with `claude_code_version_too_old`** — The Agent SDK 0.2.126 ships its own `claude` binary (Claude Code 2.1.126), and the API rejects Fable 5.1 from anything older than 2.1.251, so selecting the model in `/model` returned a 400 even though the system `claude` was current. Bumped `@anthropic-ai/claude-agent-sdk` to 0.3.260 (bundles Claude Code 2.1.260) and `@anthropic-ai/sdk` to 0.123.0 to satisfy its peer range. Workaround on older installs: set `provider.pathToClaudeCodeExecutable` to an up-to-date `claude`.
+- **Fix: prompt sent right after an abort got an empty "aborted" reply** — Pi emits `agent_end` on abort without waiting for the provider stream, but the bridge kept `activeQuery` set until the killed CLI subprocess drained its async iterator. A prompt arriving in that window (tens of ms with Agent SDK 0.3.x, which made `int-tool-message`'s abort test fail deterministically) took the tool-result/steer branch, was queued as a deferred message, and was then discarded by the abort cleanup. The abort handler now finishes pi's stream and releases the query slot synchronously; the late completion callbacks no longer touch `ctx()`, which may belong to the next query.
+- **Fix: shell integration tests aborted after the first PASS** — `((PASS++))` returns exit 1 when the counter goes 0→1, which `set -e` treated as a failure. Use `PASS=$((PASS+1))` instead.
+
 ## 0.4.6 — 2026-09-03
 
 - **Add: claude-fable-5-1 model** — Added `claude-fable-5-1` (Fable 5.1, 1M context, 64k output) via the same `EXTRA_MODELS` fallback path as the other new models. The `fable` shortcut now resolves to 5.1 by default, matching the claude CLI's own alias; `claude-fable-5` remains available for explicit pinning.

@@ -1205,6 +1205,35 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 		void sdkQuery.interrupt().catch(() => {});
 		try { sdkQuery.close(); } catch {}
 	};
+	// Finish pi's stream and release the query slot the moment an abort is
+	// requested — not when the SDK's async iterator finally drains. Pi emits
+	// agent_end on abort without waiting for the provider stream, so the user's
+	// next prompt can arrive while the killed CLI subprocess is still shutting
+	// down (tens of ms with Agent SDK 0.3.x). If activeQuery were still set at
+	// that point the prompt would take the tool-result/steer branch, get pushed to
+	// deferredUserMessages, and then be discarded by the abort cleanup — pi would
+	// see an empty "aborted" assistant message instead of a fresh reply.
+	let abortFinalized = false;
+	const finalizeAbort = () => {
+		if (abortFinalized) return;
+		abortFinalized = true;
+		if (sharedSession) sharedSession = { ...sharedSession, needsRebuild: true, forceRotate: true };
+		abortCtx.deferredUserMessages = [];
+		debug(`provider: abort detected, marked sharedSession needsRebuild + forceRotate`);
+		if (abortCtx.turnOutput) {
+			abortCtx.turnOutput.stopReason = "aborted";
+			abortCtx.turnOutput.errorMessage = "Operation aborted";
+		}
+		abortCtx.currentPiStream?.push({ type: "error", reason: "aborted", error: abortCtx.turnOutput! });
+		abortCtx.currentPiStream?.end();
+		abortCtx.currentPiStream = null;
+		// Only release if this query is still the innermost one; a nested query
+		// on top of us owns the stack until it finishes.
+		if (ctx() === abortCtx && abortCtx.activeQuery === sdkQuery) {
+			if (isReentrant) popContext();
+			else abortCtx.activeQuery = null;
+		}
+	};
 	const onAbort = () => {
 		wasAborted = true;
 		// Prevent stale deferred messages from being replayed by parent on pop
@@ -1213,6 +1242,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 		abortCtx.pendingToolCalls.clear();
 		abortCtx.pendingResults.clear();
 		requestAbort();
+		finalizeAbort();
 	};
 	if (options?.signal) {
 		if (options.signal.aborted) onAbort();
@@ -1225,17 +1255,10 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 			debug(`provider: consumeQuery completed, stopReason=${ctx().turnOutput?.stopReason}, error=${ctx().turnOutput?.errorMessage}, aborted=${wasAborted}`);
 
 			// --- Abort detection in normal completion path ---
+			// Normally already handled synchronously by onAbort; ctx() may by now
+			// belong to a newer query, so never touch it here.
 			if (wasAborted || options?.signal?.aborted) {
-				if (sharedSession) sharedSession = { ...sharedSession, needsRebuild: true, forceRotate: true };
-				ctx().deferredUserMessages = [];
-				debug(`provider: abort detected, marked sharedSession needsRebuild + forceRotate`);
-				if (ctx().turnOutput) {
-					ctx().turnOutput.stopReason = "aborted";
-					ctx().turnOutput.errorMessage = "Operation aborted";
-				}
-				ctx().currentPiStream?.push({ type: "error", reason: "aborted", error: ctx().turnOutput! });
-				ctx().currentPiStream?.end();
-				ctx().currentPiStream = null;
+				finalizeAbort();
 				return;
 			}
 
@@ -1290,17 +1313,19 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 		})
 		.catch((error) => {
 			debug(`provider: query error, model=${model.id}, aborted=${Boolean(options?.signal?.aborted)}, error=`, error);
-			if ((wasAborted || options?.signal?.aborted) && sharedSession) {
-				sharedSession = { ...sharedSession, needsRebuild: true, forceRotate: true };
-			} else {
-				sharedSession = null;
+			if (wasAborted || options?.signal?.aborted) {
+				// Killing the CLI can surface as an iterator error; the abort was
+				// already finalized in onAbort and ctx() may be a newer query.
+				finalizeAbort();
+				return;
 			}
+			sharedSession = null;
 			ctx().deferredUserMessages = [];
 			if (ctx().turnOutput) {
-				ctx().turnOutput.stopReason = options?.signal?.aborted ? "aborted" : "error";
+				ctx().turnOutput.stopReason = "error";
 				ctx().turnOutput.errorMessage = error instanceof Error ? error.message : String(error);
 			}
-			ctx().currentPiStream?.push({ type: "error", reason: (ctx().turnOutput?.stopReason ?? "error") as "aborted" | "error", error: ctx().turnOutput! });
+			ctx().currentPiStream?.push({ type: "error", reason: "error", error: ctx().turnOutput! });
 			ctx().currentPiStream?.end();
 			ctx().currentPiStream = null;
 		})
