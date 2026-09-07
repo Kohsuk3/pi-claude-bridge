@@ -6,3 +6,8 @@ eli/.DS_Store
 eli/
 
 .direnv/
+
+# code-graph / serena (local index artifacts)
+.code-review-graph/
+.serena/memories/
+graphify-out/
