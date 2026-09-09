@@ -34,6 +34,35 @@ const DEBUG = process.env.CLAUDE_BRIDGE_DEBUG === "1";
 const DEBUG_LOG_PATH = process.env.CLAUDE_BRIDGE_DEBUG_PATH || join(homedir(), ".pi", "agent", "claude-bridge.log");
 const DIAG_LOG_PATH = join(homedir(), ".pi", "agent", "claude-bridge-diag.log");
 
+// --- Child process env for the Claude Code binary ---
+// Shared by every query() call site so the knobs stay in one place.
+//
+// ENABLE_CLAUDEAI_MCP_SERVERS=0: suppress claude.ai cloud MCP servers (Figma/Canva/etc.
+//   auto-discovered via OAuth when logged into Anthropic). Separate code path from
+//   filesystem MCP; NOT blocked by --strict-mcp-config or settingSources=undefined.
+//   "0"/"false"/"no"/"off" makes the loader return early before any cloud fetch.
+// DISABLE_AUTO_COMPACT=1: pi owns context-management and propagates its own /compact
+//   via session_compact. Letting CC also autocompact would double-flush the prompt
+//   cache and race pi's threshold with CC's anti-thrashing guard (issue #8).
+// CLAUDE_CODE_TOASTY_THIMBLE=0: disable CC's "batching_reminder" (feature flag
+//   tengu_toasty_thimble). For fable models CC appends the line "First privately list
+//   what you need next; then request every item ..." as an attachment right after tool
+//   results. Through the bridge it reaches pi as unlabeled text glued to the tool output,
+//   which looks exactly like prompt injection. Any boolean-ish value disables it; a
+//   free-form string would replace the text instead.
+// CLAUDE_CODE_SILENT_TURN_REMINDER=0: same for the "silent_turn_reminder" (tengu_hushed_lark,
+//   "The user hasn't heard from you in a while..."), injected after N tool-only turns.
+//   pi's own prompts already cover progress updates; the bare line in a tool result confuses.
+function childEnv(): NodeJS.ProcessEnv {
+	return {
+		...process.env,
+		ENABLE_CLAUDEAI_MCP_SERVERS: "0",
+		DISABLE_AUTO_COMPACT: "1",
+		CLAUDE_CODE_TOASTY_THIMBLE: "0",
+		CLAUDE_CODE_SILENT_TURN_REMINDER: "0",
+	};
+}
+
 // Ensure log directories exist when debug is enabled
 if (DEBUG) {
 	try {
@@ -908,7 +937,7 @@ function streamEphemeralQuery(
 		prompt: promptText,
 		options: {
 			cwd,
-			env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: "0", DISABLE_AUTO_COMPACT: "1" },
+			env: childEnv(),
 			tools: [],
 			permissionMode: "bypassPermissions",
 			canUseTool: makeCanUseTool(),
@@ -1154,20 +1183,9 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	// Force summarized so thinking_delta events arrive. See anthropics/claude-agent-sdk-python#830.
 	if (effort) extraArgs["thinking-display"] = "summarized";
 
-	// Suppress claude.ai cloud MCP servers (Figma/Canva/etc. auto-discovered via OAuth
-	// when the user is logged into Anthropic). These are a separate code path from
-	// filesystem MCP and are NOT blocked by --strict-mcp-config or settingSources=undefined.
-	// The native CC binary gates them on env var ENABLE_CLAUDEAI_MCP_SERVERS: setting it
-	// to "0"/"false"/"no"/"off" makes the loader return early before any cloud fetch.
-	// DISABLE_AUTO_COMPACT=1: pi owns context-management and propagates its own
-	// /compact via session_compact (see handler in default export). Letting CC
-	// also autocompact would double-flush the prompt cache and races pi's
-	// threshold with CC's, including CC's anti-thrashing guard (issue #8).
-	// Manual /compact in CC still works (we never invoke it).
-	const childEnv = { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: "0", DISABLE_AUTO_COMPACT: "1" };
 	const queryOptions: NonNullable<Parameters<typeof query>[0]["options"]> = {
 		cwd,
-		env: childEnv,
+		env: childEnv(),
 		tools: [],
 		permissionMode: "bypassPermissions",
 		canUseTool: makeCanUseTool(),
@@ -1415,7 +1433,7 @@ async function promptAndWait(
 		prompt,
 		options: {
 			cwd,
-			env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: "0", DISABLE_AUTO_COMPACT: "1" },
+			env: childEnv(),
 			permissionMode: "bypassPermissions",
 			canUseTool: makeCanUseTool(mode),
 			...(disallowedTools.length ? { disallowedTools } : {}),
