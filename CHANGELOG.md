@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.8 — 2026-09-24
+
+- **Fix: on pi ≥0.86 Claude Code received zero tools and the model fabricated tool results** — pi 0.86.0 changed the provider stream input from `Context` to a normalized `TranscriptContext`: the system prompt and tool declarations now live in `role: "system"` transcript messages (`toolsAdded` / `toolsRemoved`, `sections`) and `context.tools` / `context.systemPrompt` are undefined. The bridge still read the old fields, so the `custom-tools` MCP server was never built; combined with `tools: []` (Claude Code's built-ins are disabled because pi executes tools) the model had no tools at all and started writing `<invoke>` blocks as plain text, inventing the "results" (e.g. a made-up `read` error claiming PDFs are unsupported). New `resolveTools()` / `resolveSystemPrompt()` in `src/transcript-compat.ts` accept both shapes; the skills / structured-output forwarding and the compaction-summary detection now use them too.
+
 ## 0.4.7 — 2026-09-04
 
 - **Fix: claude-fable-5-1 failed with `claude_code_version_too_old`** — The Agent SDK 0.2.126 ships its own `claude` binary (Claude Code 2.1.126), and the API rejects Fable 5.1 from anything older than 2.1.251, so selecting the model in `/model` returned a 400 even though the system `claude` was current. Bumped `@anthropic-ai/claude-agent-sdk` to 0.3.260 (bundles Claude Code 2.1.260) and `@anthropic-ai/sdk` to 0.123.0 to satisfy its peer range. Workaround on older installs: set `provider.pathToClaudeCodeExecutable` to an up-to-date `claude`.

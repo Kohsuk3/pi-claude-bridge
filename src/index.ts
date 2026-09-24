@@ -19,6 +19,7 @@ import { loadConfig } from "./config.js";
 import { extractAgentsAppend } from "./agents-md.js";
 import { jsonSchemaToZodShape } from "./typebox-to-zod.js";
 import { buildActionSummary, type ToolCallState } from "./askclaude-ui.js";
+import { resolveSystemPrompt, resolveTools } from "./transcript-compat.js";
 
 // Compat (#2): use factory if available (pi-ai ≥0.66), else fall back to constructor (gsd-pi etc.)
 const _piAi = piAi as any;
@@ -534,9 +535,8 @@ function resolveMcpTools(context: Context, excludeToolName?: string): {
 	const customToolNameToSdk = new Map<string, string>();
 	const customToolNameToPi = new Map<string, string>();
 
-	if (!context.tools) return { mcpTools, customToolNameToSdk, customToolNameToPi };
-
-	for (const tool of context.tools) {
+	// pi ≥0.86 moved tool declarations into transcript system messages; resolveTools handles both shapes.
+	for (const tool of resolveTools(context)) {
 		if (tool.name === excludeToolName) continue;
 		const sdkName = `${MCP_TOOL_PREFIX}${tool.name}`;
 		mcpTools.push(tool);
@@ -928,9 +928,7 @@ function streamEphemeralQuery(
 	const extraArgs: Record<string, string | null> = { model: model.id, "strict-mcp-config": null };
 	if (effort) extraArgs["thinking-display"] = "summarized";
 
-	const customSystemPrompt = typeof context.systemPrompt === "string" && context.systemPrompt
-		? context.systemPrompt
-		: undefined;
+	const customSystemPrompt = resolveSystemPrompt(context);
 	const promptText = extractUserPrompt(context.messages) ?? "";
 
 	const sdkQuery = query({
@@ -1012,8 +1010,7 @@ function streamEphemeralQuery(
 // transcript serialized into one prompt), not a continuation of the conversation.
 const SUMMARIZATION_SYSTEM_PROMPT_MARKER = "You are a context summarization assistant";
 function isSummarizationContext(context: Context): boolean {
-	return typeof context.systemPrompt === "string"
-		&& context.systemPrompt.startsWith(SUMMARIZATION_SYSTEM_PROMPT_MARKER);
+	return resolveSystemPrompt(context)?.startsWith(SUMMARIZATION_SYSTEM_PROMPT_MARKER) ?? false;
 }
 
 /** Provider entry point. Pi calls this for each new prompt and each tool result.
@@ -1152,9 +1149,10 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	const providerSettings = loadConfig(cwd).provider ?? {};
 	const appendSystemPrompt = providerSettings.appendSystemPrompt !== false;
 	const agentsAppend = appendSystemPrompt ? extractAgentsAppend() : undefined;
-	const skillsAppend = appendSystemPrompt ? extractSkillsBlock(context.systemPrompt) : undefined;
+	const piSystemPrompt = resolveSystemPrompt(context);
+	const skillsAppend = appendSystemPrompt ? extractSkillsBlock(piSystemPrompt) : undefined;
 	// Forwarded unconditionally: an unmet structured-output contract fails the subagent step outright.
-	const structuredAppend = extractStructuredOutputBlock(context.systemPrompt);
+	const structuredAppend = extractStructuredOutputBlock(piSystemPrompt);
 	const appendParts = [agentsAppend, skillsAppend, structuredAppend].filter((part): part is string => Boolean(part));
 	const systemPromptAppend = appendParts.length > 0 ? appendParts.join("\n\n") : undefined;
 
