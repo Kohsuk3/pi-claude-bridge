@@ -66,8 +66,12 @@ describe("MODELS projection", () => {
 describe("resolveModelId", () => {
 	const models = buildModels(MODEL_IDS_IN_ORDER.map(mockPiAiModel));
 
-	it("opus shortcut resolves to claude-opus-5 (first opus in order)", () => {
-		assert.equal(resolveModelId(models, "opus"), "claude-opus-5");
+	it("opus shortcut resolves to claude-opus-5-5 (first opus in order)", () => {
+		assert.equal(resolveModelId(models, "opus"), "claude-opus-5-5");
+	});
+
+	it("exact claude-opus-5 still pins opus 5, not 5.5", () => {
+		assert.equal(resolveModelId(models, "claude-opus-5"), "claude-opus-5");
 	});
 
 	it("sonnet shortcut resolves to claude-sonnet-5 (first sonnet in order)", () => {
