@@ -74,8 +74,12 @@ describe("resolveModelId", () => {
 		assert.equal(resolveModelId(models, "claude-opus-5"), "claude-opus-5");
 	});
 
-	it("sonnet shortcut resolves to claude-sonnet-5 (first sonnet in order)", () => {
-		assert.equal(resolveModelId(models, "sonnet"), "claude-sonnet-5");
+	it("sonnet shortcut resolves to claude-sonnet-5-5 (first sonnet in order)", () => {
+		assert.equal(resolveModelId(models, "sonnet"), "claude-sonnet-5-5");
+	});
+
+	it("exact claude-sonnet-5 still pins sonnet 5, not 5.5", () => {
+		assert.equal(resolveModelId(models, "claude-sonnet-5"), "claude-sonnet-5");
 	});
 
 	it("fable shortcut resolves to claude-fable-5-1 (first fable in order)", () => {

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Add: claude-sonnet-5-5 model** — Added `claude-sonnet-5-5` (Sonnet 5.5) via the `EXTRA_MODELS` fallback path. The `sonnet` shortcut now resolves to 5.5 by default; `claude-sonnet-5` and 4.6 remain available for explicit pinning.
+- **Add: claude-opus-5-5 model** — Added `claude-opus-5-5` (Opus 5.5) the same way; the `opus` shortcut now resolves to 5.5.
+- **Fix: `zod` declared as a direct dependency** — `@anthropic-ai/claude-agent-sdk` 0.3.284 moved `zod` to a peerDependency, so fresh installs failed with `Cannot find module 'zod'`.
+
 ## 0.4.8 — 2026-09-24
 
 - **Fix: on pi ≥0.86 Claude Code received zero tools and the model fabricated tool results** — pi 0.86.0 changed the provider stream input from `Context` to a normalized `TranscriptContext`: the system prompt and tool declarations now live in `role: "system"` transcript messages (`toolsAdded` / `toolsRemoved`, `sections`) and `context.tools` / `context.systemPrompt` are undefined. The bridge still read the old fields, so the `custom-tools` MCP server was never built; combined with `tools: []` (Claude Code's built-ins are disabled because pi executes tools) the model had no tools at all and started writing `<invoke>` blocks as plain text, inventing the "results" (e.g. a made-up `read` error claiming PDFs are unsupported). New `resolveTools()` / `resolveSystemPrompt()` in `src/transcript-compat.ts` accept both shapes; the skills / structured-output forwarding and the compaction-summary detection now use them too.
