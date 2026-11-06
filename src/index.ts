@@ -1013,6 +1013,18 @@ function isSummarizationContext(context: Context): boolean {
 	return resolveSystemPrompt(context)?.startsWith(SUMMARIZATION_SYSTEM_PROMPT_MARKER) ?? false;
 }
 
+/** omp-style bare one-shot (skill description compression, titles, ...): a single user message with
+ *  no system prompt and no tools. The real conversation always carries a system prompt, so this never
+ *  matches it; running it through the shared CC session would clobber sharedSession. */
+function isBareOneShotContext(context: Context): boolean {
+	return (
+		context.messages.length === 1 &&
+		context.messages[0]?.role === "user" &&
+		!resolveSystemPrompt(context) &&
+		resolveTools(context).length === 0
+	);
+}
+
 /** Provider entry point. Pi calls this for each new prompt and each tool result.
  *  Two cases: tool result delivery (active query) or fresh query. */
 function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream {
@@ -1026,8 +1038,8 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	// transcript (with high thinking, /compact appeared to hang for minutes) and clobbering
 	// sharedSession; split-turn auto-compaction even fires two in parallel that deadlock on
 	// the same session JSONL. Run them isolated instead. See streamEphemeralQuery.
-	if (isSummarizationContext(context)) {
-		debug(`provider: routing to ephemeral one-shot (compaction/branch summary), msgs=${context.messages.length}`);
+	if (isSummarizationContext(context) || isBareOneShotContext(context)) {
+		debug(`provider: routing to ephemeral one-shot (compaction/branch summary/bare one-shot), msgs=${context.messages.length}`);
 		streamEphemeralQuery(model, context, options, stream);
 		return stream;
 	}
@@ -1538,6 +1550,16 @@ let askClaudeToolName = "AskClaude";
 export default function (pi: ExtensionAPI) {
 	// Disable non-essential Claude Code traffic (update checks, MCP registry, telemetry)
 	process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
+
+	// The SDK warns on every query that canUseTool is shadowed by bypassPermissions. That is
+	// intentional here (canUseTool is the fallback when Enterprise policy neutralizes bypass,
+	// see makeCanUseTool), so drop only this warning code.
+	const origEmitWarning = process.emitWarning.bind(process);
+	process.emitWarning = ((warning: string | Error, ...args: any[]) => {
+		const code = typeof args[0] === "object" && args[0] ? args[0].code : args[1];
+		if (code === "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED") return;
+		return (origEmitWarning as any)(warning, ...args);
+	}) as typeof process.emitWarning;
 
 	const config = loadConfig(process.cwd());
 	debug("loadConfig:", JSON.stringify(config));
